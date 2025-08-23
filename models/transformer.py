@@ -1,11 +1,19 @@
+"""Transformer wrapper with positional encoding for speech quality assessment.
+
+This module provides a transformer encoder wrapper with configurable positional
+encoding strategies for processing audio features.
+"""
+
 import math
-from torch import Tensor, nn
+from typing import Optional
+
 import torch
+from torch import Tensor, nn
 
 try:
-    from transformer_config import Config
-except:
-    from models.transformer_config import Config
+    from config import Config
+except ImportError:
+    from models.config import Config
 
 class TransformerWrapper(nn.Module):
 
@@ -87,54 +95,47 @@ class PositionalEncoding(nn.Module):
         return x
 
 class PositionalEncodingVariable(nn.Module):
-    """
-    Positional encoding module for variable-length sequences.
-
+    """Variable-length positional encoding for dynamic sequences.
+    
+    This encoding computes positional embeddings dynamically based on
+    the actual sequence length of the input, rather than using a fixed
+    maximum length. Useful for sequences with varying lengths.
+    
     Args:
-        config (Config): Configuration object containing model parameters.
-
-    Attributes:
-        pe (Tensor): Positional encoding tensor.
-
+        config: Configuration containing transformer parameters
     """
 
     def __init__(self, config: Config):
         super().__init__()
-
-        d_model: int = config.dim_transformer
-        seq_len: int = config.feat_seq_len
-        position = torch.arange(seq_len).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2)
-                             * (-math.log(2*seq_len) / d_model))
-        pe = torch.zeros(1, seq_len, d_model)
-        pe[0, :, 0::2] = torch.sin(position * div_term)
-        pe[0, :, 1::2] = torch.cos(position * div_term)
-        #self.register_buffer('pe', pe)
+        self.d_model = config.dim_transformer
 
     def forward(self, x: Tensor) -> Tensor:
-        """
-        Apply positional encoding to the input tensor.
-
+        """Apply dynamic positional encoding to input tensor.
+        
         Args:
-            x (Tensor): Input tensor of shape [seq_len, batch_size, embedding_dim]
-
+            x: Input tensor of shape (batch_size, sequence_length, embedding_dim)
+            
         Returns:
-            Tensor: Output tensor with positional encoding applied.
-
+            Tensor with positional encoding added, same shape as input
         """
-        d_model: int = 256
-        seq_len: int = x.shape[1]
-        position = torch.arange(seq_len).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2)
-                             * (-math.log(2*seq_len) / d_model))
-        pe = torch.zeros(1, seq_len, d_model).cuda()
-        pe[0, :, 0::2] = torch.sin(position * div_term)
-        pe[0, :, 1::2] = torch.cos(position * div_term)
-        self.register_buffer('pe', pe)
-        self.pe.to(x.device)
-
-        x = x + self.pe.expand(x.shape)
-        return x
+        batch_size, seq_len, _ = x.shape
+        device = x.device
+        
+        # Create position indices
+        position_ids = torch.arange(seq_len, device=device).unsqueeze(1).float()
+        
+        # Compute division term
+        div_term = torch.exp(
+            torch.arange(0, self.d_model, 2, device=device).float() * 
+            -(math.log(10000.0) / self.d_model)
+        )
+        
+        # Compute positional encoding
+        pe = torch.zeros(1, seq_len, self.d_model, device=device)
+        pe[0, :, 0::2] = torch.sin(position_ids * div_term)
+        pe[0, :, 1::2] = torch.cos(position_ids * div_term)
+        
+        return x + pe
 
 
 
