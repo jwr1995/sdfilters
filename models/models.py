@@ -30,7 +30,7 @@ except ImportError:
     )
     from models.transformer import TransformerWrapper
     from models.config import CenterCrop, Config, Input
-    from models.pooling import PoolAttFF
+    from models.pooling import PoolAttFF, MultiHeadClassificationPool
 
 
 

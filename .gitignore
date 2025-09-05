@@ -203,3 +203,14 @@ results/
 
 # OS generated files
 .directory
+
+# Custom
+yodas_cache/
+external/
+papers/
+test_*/
+.claude/
+archive/
+journal/
+data/
+annotations/

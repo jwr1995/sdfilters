@@ -1,7 +1,7 @@
-"""Pooling layers for sequence aggregation and final prediction.
+"""Pooling layers for sequence aggregation and classification.
 
 This module contains pooling mechanisms that aggregate sequential features
-into final quality predictions for speech quality assessment.
+into final predictions for multi-task audio classification tasks.
 """
 
 from typing import Optional
@@ -16,7 +16,7 @@ class PoolAttFF(nn.Module):
     
     This module applies attention-based pooling to aggregate sequence features
     into a single representation, followed by a feed-forward network for
-    final prediction.
+    final binary classification prediction.
     
     Args:
         dim_head_in: Input dimension size
@@ -30,7 +30,7 @@ class PoolAttFF(nn.Module):
         self.attention_proj = nn.Linear(dim_head_in, 2 * dim_head_in)
         self.attention_score = nn.Linear(2 * dim_head_in, 1)
         
-        # Output projection
+        # Output projection for binary classification
         self.output_proj = nn.Linear(dim_head_in, 1)
         
         # Regularization
@@ -43,7 +43,7 @@ class PoolAttFF(nn.Module):
             x: Input tensor of shape (batch_size, sequence_length, features)
             
         Returns:
-            Pooled tensor of shape (batch_size, 1)
+            Raw logit tensor of shape (batch_size, 1) for binary classification
         """
         # Compute attention weights
         attention_features = F.relu(self.attention_proj(x))
@@ -55,10 +55,66 @@ class PoolAttFF(nn.Module):
         pooled_features = torch.bmm(attention_weights, x)  # (B, 1, features)
         pooled_features = pooled_features.squeeze(1)  # (B, features)
         
-        # Final projection
-        output = self.output_proj(pooled_features)  # (B, 1)
+        # Final projection (raw logits, no activation)
+        logits = self.output_proj(pooled_features)  # (B, 1)
         
-        return output
+        return logits
+
+
+class MultiHeadClassificationPool(nn.Module):
+    """Multi-head classification pooling with named outputs.
+    
+    This module creates separate attention pooling heads for each classification
+    task, allowing for flexible multi-task learning with named outputs.
+    
+    Args:
+        dim_input: Input feature dimension
+        task_labels: Dictionary mapping task names to task descriptions
+                    e.g., {'multispeaker': 'Multiple speakers present', 
+                          'music': 'Background music detected', ...}
+        dropout_rate: Dropout probability for attention pooling
+    """
+    
+    def __init__(
+        self, 
+        dim_input: int, 
+        task_labels: dict[str, str],
+        dropout_rate: float = 0.1
+    ):
+        super().__init__()
+        
+        self.task_labels = task_labels
+        self.task_names = list(task_labels.keys())
+        self.n_tasks = len(self.task_names)
+        
+        # Create named classification heads
+        self.classification_heads = nn.ModuleDict({
+            task_name: PoolAttFF(dim_input, dropout_rate)
+            for task_name in self.task_names
+        })
+        
+    def forward(self, x: Tensor) -> dict[str, Tensor]:
+        """Apply multi-head classification pooling.
+        
+        Args:
+            x: Input tensor of shape (batch_size, sequence_length, features)
+            
+        Returns:
+            Dictionary mapping task names to logit tensors of shape (batch_size, 1)
+        """
+        outputs = {}
+        for task_name, head in self.classification_heads.items():
+            outputs[task_name] = head(x)
+            
+        return outputs
+    
+    def get_task_info(self) -> dict[str, str]:
+        """Get task information dictionary.
+        
+        Returns:
+            Dictionary mapping task names to descriptions
+        """
+        return self.task_labels.copy()
 
 
 class GlobalAveragePooling(nn.Module):
@@ -78,12 +134,12 @@ class GlobalAveragePooling(nn.Module):
             x: Input tensor of shape (batch_size, sequence_length, features)
             
         Returns:
-            Pooled tensor of shape (batch_size, 1)
+            Classification logits of shape (batch_size, 1)
         """
         # Global average pooling across sequence dimension
         pooled = x.mean(dim=1)  # (B, features)
-        output = self.output_proj(pooled)  # (B, 1)
-        return output
+        logits = self.output_proj(pooled)  # (B, 1)
+        return logits
 
 
 class MaxPooling(nn.Module):
@@ -104,9 +160,9 @@ class MaxPooling(nn.Module):
             x: Input tensor of shape (batch_size, sequence_length, features)
             
         Returns:
-            Pooled tensor of shape (batch_size, 1)
+            Classification logits of shape (batch_size, 1)
         """
         # Max pooling across sequence dimension
         pooled, _ = x.max(dim=1)  # (B, features)
-        output = self.output_proj(pooled)  # (B, 1)
-        return output
+        logits = self.output_proj(pooled)  # (B, 1)
+        return logits
